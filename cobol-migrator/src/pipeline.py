@@ -23,15 +23,19 @@ _COBOL_SUFFIXES = {".cbl", ".cob", ".cobol"}
 # ── Graph ─────────────────────────────────────────────────────────────────────
 
 def _should_retry(state: MigrationState) -> str:
-    results = state["test_results"]
-    total = results.get("total", 0)
-    passed = results.get("passed", 0)
-    all_passed = total > 0 and passed == total
-    no_lint = len(state["lint_results"]) == 0
-
-    if (all_passed and no_lint) or state["iteration_count"] >= state["max_iterations"]:
+    if state["iteration_count"] >= state["max_iterations"]:
         return "document"
-    return "translate"
+
+    results = state["test_results"]
+    has_lint      = len(state["lint_results"]) > 0
+    has_failures  = results.get("failed", 0) > 0
+    # "No tests collected" counts as an error only if the error_log mentions it
+    has_test_error = any("No tests collected" in e for e in state["error_log"])
+
+    # Only retry when there's something concrete to fix
+    if has_lint or has_failures or has_test_error:
+        return "translate"
+    return "document"
 
 
 def _build_pipeline():

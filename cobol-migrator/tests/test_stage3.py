@@ -204,12 +204,23 @@ class TestShouldRetry:
         assert _should_retry(state) == "document"
 
     def test_routes_to_document_when_no_tests_run_but_no_lint(self):
-        # total=0 means all_passed is False (no tests ran) — should retry
+        # 0/0 tests with no lint and no error_log → nothing to fix, go to document
         state = _make_state(
             test_results={"passed": 0, "failed": 0, "errors": [], "total": 0},
             lint_results=[],
             iteration_count=1,
             max_iterations=3,
+            error_log=[],
+        )
+        assert _should_retry(state) == "document"
+
+    def test_retries_when_no_tests_collected_error_in_log(self):
+        state = _make_state(
+            test_results={"passed": 0, "failed": 0, "errors": [], "total": 0},
+            lint_results=[],
+            iteration_count=1,
+            max_iterations=3,
+            error_log=["ValidateAgent: No tests collected: ..."],
         )
         assert _should_retry(state) == "translate"
 

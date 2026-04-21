@@ -1,5 +1,6 @@
 import re
 import httpx
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from src.state import MigrationState
 from src.llm import chat
 
@@ -117,8 +118,11 @@ def parse_agent(state: MigrationState) -> MigrationState:
         call_refs = _extract_call_refs(source)
         paragraphs = _extract_paragraphs(source, variables, copy_refs, call_refs)
 
-        for p in paragraphs:
-            p["summary"] = _summarize(p["name"], p["body"])
+        # Summarise all paragraphs in parallel to avoid sequential LLM latency
+        with ThreadPoolExecutor(max_workers=min(len(paragraphs), 4)) as pool:
+            futures = {pool.submit(_summarize, p["name"], p["body"]): i for i, p in enumerate(paragraphs)}
+            for fut in as_completed(futures):
+                paragraphs[futures[fut]]["summary"] = fut.result()
 
         return {**state, "source_code": source, "paragraphs": paragraphs, "status": "parsing"}
 
