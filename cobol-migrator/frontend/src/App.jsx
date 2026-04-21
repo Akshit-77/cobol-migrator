@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { submitMigration, getStatus } from './api'
 import InputPanel from './components/InputPanel'
 import StatusBar from './components/StatusBar'
+import ProgressSteps from './components/ProgressSteps'
 import CodePanel from './components/CodePanel'
 import ValidationPanel from './components/ValidationPanel'
 import DocumentPanel from './components/DocumentPanel'
@@ -62,7 +63,10 @@ export default function App() {
     }
   }
 
+  const isTerminal = TERMINAL_STATUSES.has(status)
   const isDone = status === 'done' && result
+  const iterationCount = result?.iteration_count ?? 0
+  const maxIterations = result?.max_iterations ?? 3
 
   return (
     <>
@@ -75,7 +79,17 @@ export default function App() {
 
       {error && <div className="error-box">{error}</div>}
 
-      {status && <StatusBar status={status} />}
+      {/* Live step progress while running */}
+      {status && !isTerminal && (
+        <ProgressSteps
+          status={status}
+          iterationCount={iterationCount}
+          maxIterations={maxIterations}
+        />
+      )}
+
+      {/* Compact status bar once finished */}
+      {isTerminal && <StatusBar status={status} />}
 
       {isDone && !isRepo && (
         <>
