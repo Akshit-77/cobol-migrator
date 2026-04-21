@@ -62,15 +62,23 @@ def _run_tests(translated_code: str, test_code: str, tmpdir: str) -> dict:
     # conftest.py puts tmpdir on sys.path so `import translated` always works
     conftest_path = os.path.join(tmpdir, "conftest.py")
 
+    # Prepend path setup directly into the test file — guaranteed to work
+    # regardless of pytest rootdir, conftest resolution, or PYTHONPATH state.
+    path_header = (
+        f"import sys as _sys, os as _os\n"
+        f"_sys.path.insert(0, {tmpdir!r})\n\n"
+    )
+
     with open(src_path, "w") as f:
         f.write(translated_code)
     with open(test_path, "w") as f:
-        f.write(test_code)
+        f.write(path_header + test_code)
     with open(conftest_path, "w") as f:
         f.write(f"import sys\nsys.path.insert(0, {tmpdir!r})\n")
 
     env = os.environ.copy()
-    env["PYTHONPATH"] = tmpdir
+    existing = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = tmpdir + (os.pathsep + existing if existing else "")
 
     result = subprocess.run(
         [sys.executable, "-m", "pytest", test_path, "-v", "--tb=short", "--no-header", "-q"],
@@ -86,9 +94,12 @@ def _run_tests(translated_code: str, test_code: str, tmpdir: str) -> dict:
               if "ERROR" in ln or "FAILED" in ln or "ImportError" in ln or "ModuleNotFoundError" in ln]
     total = passed + failed
 
-    # If nothing ran at all, treat the full output as an error so the loop can fix it
-    if total == 0 and output.strip():
-        short = "\n".join(output.strip().splitlines()[:6])
+    # If nothing ran at all, surface the full output so the loop can fix it
+    if total == 0:
+        import sys as _sys
+        print("[validate_agent] 0 tests collected. pytest output:", file=_sys.stderr)
+        print(output[:800] if output else "(empty)", file=_sys.stderr)
+        short = "\n".join(output.strip().splitlines()[:8]) if output.strip() else "pytest produced no output"
         errors = errors or [f"No tests collected: {short}"]
 
     return {"passed": passed, "failed": failed, "errors": errors, "total": total}
