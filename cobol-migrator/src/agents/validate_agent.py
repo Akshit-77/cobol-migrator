@@ -30,14 +30,21 @@ def _lint_check(code: str, tmpdir: str) -> list[str]:
 
 
 def _generate_tests(state: MigrationState) -> str:
+    fn_names = [p["name"].lower().replace("-", "_") for p in state["paragraphs"]]
     para_summaries = "\n".join(
         f"- {p['name']}: {p['summary']}" for p in state["paragraphs"]
     )
     prompt = (
-        "Generate a pytest test module for the following Python 3 code.\n"
-        "Write at least one test per function. Use only the standard library and pytest.\n"
-        "Do NOT import any external packages. Output only a ```python ... ``` block.\n\n"
-        f"Paragraph purposes:\n{para_summaries}\n\n"
+        "Generate a pytest test module for the Python 3 code below.\n\n"
+        "STRICT RULES:\n"
+        "1. The code lives in a file called `translated.py`. Import from it like: "
+        f"  `from translated import {', '.join(fn_names) or 'main'}`\n"
+        "2. Do NOT use `if __name__ == '__main__':` in the test file.\n"
+        "3. Use only the Python standard library and pytest — no other packages.\n"
+        "4. Write at least one test function per function in the code.\n"
+        "5. Tests must be runnable without any external setup or files.\n"
+        "6. Output ONLY a ```python ... ``` block — nothing else.\n\n"
+        f"Function purposes:\n{para_summaries}\n\n"
         f"Code to test:\n```python\n{state['translated_code']}\n```"
     )
     raw = chat(
@@ -67,8 +74,15 @@ def _run_tests(translated_code: str, test_code: str, tmpdir: str) -> dict:
     import re
     passed = len(re.findall(r" PASSED", output))
     failed = len(re.findall(r" FAILED", output))
-    errors = [ln for ln in output.splitlines() if "ERROR" in ln or "FAILED" in ln]
+    # Capture collection errors so the self-correction loop can see them
+    errors = [ln for ln in output.splitlines()
+              if "ERROR" in ln or "FAILED" in ln or "ImportError" in ln or "ModuleNotFoundError" in ln]
     total = passed + failed
+
+    # If nothing ran at all, treat the full output as an error so the loop can fix it
+    if total == 0 and output.strip():
+        short = "\n".join(output.strip().splitlines()[:6])
+        errors = errors or [f"No tests collected: {short}"]
 
     return {"passed": passed, "failed": failed, "errors": errors, "total": total}
 

@@ -6,13 +6,16 @@ from src.llm import chat
 _SYSTEM_PROMPT = """You are an expert COBOL to Python 3 migration specialist.
 
 Translation rules:
-- COMPUTE X = Y      →  x = y  (use Decimal for any PIC 9...V99 financial fields)
+- COMPUTE X = Y      →  x = y  (only use Decimal for fields that actually have V99 / decimal places)
 - MOVE X TO Y        →  y = x
 - DISPLAY "text"     →  print("text")
 - PERFORM PARA       →  call the equivalent Python function
 - IF X > Y ... END-IF  →  if x > y: ...
+- PERFORM UNTIL C    →  while not C: ...
+- ADD 1 TO X         →  x += 1
 - COBOL-KEBAB-CASE   →  python_snake_case  for all identifiers
 - COPY / CALL refs that could not be resolved →  leave a  # TODO: resolve <NAME>  stub
+- Only import what you actually use. Do NOT add unused imports.
 
 Output a single complete Python 3 module inside a ```python ... ``` block. No explanation outside the block."""
 
@@ -46,6 +49,37 @@ def _build_prompt(state: MigrationState) -> str:
     )
 
 
+def _strip_unused_imports(code: str) -> str:
+    """Remove import lines flagged as unused by pyflakes."""
+    import subprocess, sys, tempfile, os
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
+            f.write(code)
+            tmp = f.name
+        result = subprocess.run(
+            [sys.executable, "-m", "pyflakes", tmp],
+            capture_output=True, text=True, timeout=10,
+        )
+        os.unlink(tmp)
+        unused: set[str] = set()
+        for line in result.stdout.splitlines():
+            m = re.search(r"'([^']+)' imported but unused", line)
+            if m:
+                unused.add(m.group(1).split(".")[0])  # top-level module name
+        if not unused:
+            return code
+        cleaned = []
+        for line in code.splitlines():
+            # Remove the whole import line if it only imports unused names
+            if re.match(r"^\s*(import|from)\s+", line):
+                if any(name in line for name in unused):
+                    continue
+            cleaned.append(line)
+        return "\n".join(cleaned)
+    except Exception:
+        return code
+
+
 def translate_agent(state: MigrationState) -> MigrationState:
     try:
         raw = chat(
@@ -56,6 +90,7 @@ def translate_agent(state: MigrationState) -> MigrationState:
 
         match = re.search(r"```python\n(.*?)```", raw, re.DOTALL)
         translated = match.group(1).strip() if match else raw.strip()
+        translated = _strip_unused_imports(translated)
 
         return {
             **state,

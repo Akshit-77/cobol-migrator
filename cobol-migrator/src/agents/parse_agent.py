@@ -49,6 +49,15 @@ def _extract_call_refs(source: str) -> list[str]:
     return list(dict.fromkeys(re.findall(r"\bCALL\s+['\"]?([\w-]+)['\"]?", source, re.IGNORECASE)))
 
 
+# COBOL reserved words that look like paragraph names but are statements
+_COBOL_KEYWORDS = {
+    "STOP", "GOBACK", "EXIT", "CONTINUE", "NEXT", "END", "ELSE",
+    "MOVE", "COMPUTE", "ADD", "SUBTRACT", "MULTIPLY", "DIVIDE",
+    "DISPLAY", "ACCEPT", "PERFORM", "CALL", "IF", "EVALUATE",
+    "READ", "WRITE", "OPEN", "CLOSE", "RETURN",
+}
+
+
 def _extract_paragraphs(
     source: str,
     variables: list[str],
@@ -58,15 +67,16 @@ def _extract_paragraphs(
     proc_match = re.search(r"PROCEDURE DIVISION.*?\.(.*)", source, re.DOTALL | re.IGNORECASE)
     proc_body = proc_match.group(1) if proc_match else source
 
-    # Paragraph names: a bare identifier followed by a period on its own line
-    parts = re.split(r"\n([\w][\w-]*)\s*\.\s*(?=\n)", proc_body)
+    # Paragraph names: optional leading whitespace, bare identifier, then a period
+    # Handles both standard (col 8) and indented COBOL source
+    parts = re.split(r"\n[ \t]*([\w][\w-]*)\s*\.\s*(?=\n)", proc_body)
 
     paragraphs: list[dict] = []
     if len(parts) >= 3:
         for i in range(1, len(parts), 2):
-            name = parts[i].strip()
+            name = parts[i].strip().upper()
             body = parts[i + 1].strip() if i + 1 < len(parts) else ""
-            if body:
+            if body and name not in _COBOL_KEYWORDS:
                 paragraphs.append({
                     "name": name,
                     "body": body,
