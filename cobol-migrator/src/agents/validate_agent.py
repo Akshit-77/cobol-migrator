@@ -59,15 +59,22 @@ def _generate_tests(state: MigrationState) -> str:
 def _run_tests(translated_code: str, test_code: str, tmpdir: str) -> dict:
     src_path = os.path.join(tmpdir, "translated.py")
     test_path = os.path.join(tmpdir, "test_translated.py")
+    # conftest.py puts tmpdir on sys.path so `import translated` always works
+    conftest_path = os.path.join(tmpdir, "conftest.py")
 
     with open(src_path, "w") as f:
         f.write(translated_code)
     with open(test_path, "w") as f:
         f.write(test_code)
+    with open(conftest_path, "w") as f:
+        f.write(f"import sys\nsys.path.insert(0, {tmpdir!r})\n")
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = tmpdir
 
     result = subprocess.run(
         [sys.executable, "-m", "pytest", test_path, "-v", "--tb=short", "--no-header", "-q"],
-        capture_output=True, text=True, timeout=30, cwd=tmpdir,
+        capture_output=True, text=True, timeout=30, cwd=tmpdir, env=env,
     )
     output = result.stdout + result.stderr
 
