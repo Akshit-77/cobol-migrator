@@ -1,0 +1,27 @@
+[project]
+name = "cobol-migrator"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "anthropic>=0.49.0",
+    "fastapi>=0.115.0",
+    "google-genai>=1.0.0",
+    "groq>=0.11.0",
+    "httpx>=0.28.0",
+    "langgraph>=1.0.0",
+    "openai>=1.68.0",
+    "python-dotenv>=1.0.1",
+    "uvicorn[standard]>=0.32.0",
+]
+
+[dependency-groups]
+dev = [
+    "pyflakes>=3.2.0",
+    "pytest>=8.3.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
