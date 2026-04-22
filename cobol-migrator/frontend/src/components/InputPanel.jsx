@@ -1,6 +1,10 @@
 import { useState } from 'react'
 
-const TABS = ['Paste Code', 'File URL', 'Repo URL']
+const TABS = [
+  { label: 'Paste Code', key: 'code' },
+  { label: 'File URL',   key: 'url' },
+  { label: 'Repo URL',   key: 'repo' },
+]
 
 export default function InputPanel({ onSubmit, loading }) {
   const [tab, setTab] = useState(0)
@@ -14,24 +18,39 @@ export default function InputPanel({ onSubmit, loading }) {
     else onSubmit({ repo_url: repoUrl })
   }
 
-  const disabled = loading || (tab === 0 ? !code.trim() : tab === 1 ? !fileUrl.trim() : !repoUrl.trim())
+  const disabled = loading || (
+    tab === 0 ? !code.trim() :
+    tab === 1 ? !fileUrl.trim() :
+    !repoUrl.trim()
+  )
+
+  const hints = [
+    'Paste raw COBOL source — IDENTIFICATION, WORKING-STORAGE, PROCEDURE DIVISION',
+    'https://github.com/owner/repo/blob/main/program.cbl',
+    'https://github.com/owner/repo — migrates all .cbl / .cob / .cobol files',
+  ]
 
   return (
     <div className="card">
       <div className="tabs">
         {TABS.map((t, i) => (
-          <button key={t} className={`tab ${tab === i ? 'active' : ''}`} onClick={() => setTab(i)}>
-            {t}
+          <button
+            key={t.key}
+            className={`tab ${tab === i ? 'active' : ''}`}
+            onClick={() => setTab(i)}
+          >
+            {t.label}
           </button>
         ))}
       </div>
 
       {tab === 0 && (
         <textarea
-          rows={12}
+          rows={14}
           placeholder="Paste COBOL source code here..."
           value={code}
           onChange={e => setCode(e.target.value)}
+          spellCheck={false}
         />
       )}
       {tab === 1 && (
@@ -51,9 +70,14 @@ export default function InputPanel({ onSubmit, loading }) {
         />
       )}
 
-      <div style={{ marginTop: 12 }}>
-        <button className="btn-primary" onClick={handleSubmit} disabled={disabled}>
-          {loading ? 'Migrating…' : 'Migrate to Python 3'}
+      <div className="input-submit-row">
+        <span className="input-hint">{hints[tab]}</span>
+        <button
+          className={`btn-primary ${loading ? 'loading-state' : ''}`}
+          onClick={handleSubmit}
+          disabled={disabled}
+        >
+          {loading ? '◌ MIGRATING…' : 'MIGRATE →'}
         </button>
       </div>
     </div>

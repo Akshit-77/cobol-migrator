@@ -4,7 +4,10 @@ export default function DocumentPanel({ documentation }) {
   if (!documentation) return null
   return (
     <div className="card">
-      <h3>Migration Report</h3>
+      <div className="panel-header">
+        <span className="panel-accent panel-accent-amber" />
+        <span className="panel-title">Migration Report</span>
+      </div>
       <div className="markdown-body">
         <ReactMarkdown>{documentation}</ReactMarkdown>
       </div>

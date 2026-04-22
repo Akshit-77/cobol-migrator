@@ -8,10 +8,9 @@ export default function ValidationPanel({ result }) {
   const { test_results, lint_results, confidence_score, iteration_count } = result
 
   return (
-    <div className="card">
-      <h3>Validation</h3>
-      <div className="metric-row">
-        <div className="metric">
+    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+      <div className="validation-grid">
+        <div className="metric metric-confidence">
           <span className="metric-label">Confidence</span>
           <span className="metric-value">
             <span className={`badge ${confidenceBadge(confidence_score)}`}>
@@ -19,7 +18,8 @@ export default function ValidationPanel({ result }) {
             </span>
           </span>
         </div>
-        <div className="metric">
+
+        <div className="metric metric-tests">
           <span className="metric-label">Tests</span>
           <span className="metric-value">
             {test_results.passed}/{test_results.total}
@@ -29,10 +29,12 @@ export default function ValidationPanel({ result }) {
             </span>
           </span>
         </div>
+
         <div className="metric">
           <span className="metric-label">Iterations</span>
           <span className="metric-value">{iteration_count}</span>
         </div>
+
         <div className="metric">
           <span className="metric-label">Lint warnings</span>
           <span className="metric-value">{lint_results.length}</span>
@@ -40,12 +42,14 @@ export default function ValidationPanel({ result }) {
       </div>
 
       {lint_results.length > 0 && (
-        <>
-          <h3 style={{ marginTop: 8 }}>Lint Warnings</h3>
-          <ul className="lint-list">
-            {lint_results.map((w, i) => <li key={i}>{w}</li>)}
-          </ul>
-        </>
+        <div style={{ padding: '0 24px 20px' }}>
+          <div className="lint-section">
+            <div className="lint-section-label">Lint Warnings</div>
+            <ul className="lint-list">
+              {lint_results.map((w, i) => <li key={i}>{w}</li>)}
+            </ul>
+          </div>
+        </div>
       )}
     </div>
   )

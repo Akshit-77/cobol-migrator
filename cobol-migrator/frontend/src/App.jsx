@@ -70,16 +70,27 @@ export default function App() {
 
   return (
     <>
-      <div className="header">
-        <h1>COBOL → Python 3 Migrator</h1>
-        <p>IE624 · IIT Bombay · Agentic AI</p>
-      </div>
+      <header className="site-header">
+        <div className="site-header-inner">
+          <div className="header-logo">
+            <span className="logo-cobol">COBOL</span>
+            <span className="logo-arrow">→</span>
+            <span className="logo-python">PYTHON 3</span>
+          </div>
+          <div className="header-meta">
+            <span className="meta-tag">IE624</span>
+            <span className="meta-sep">·</span>
+            <span className="meta-tag">IIT BOMBAY</span>
+            <span className="meta-sep">·</span>
+            <span className="meta-tag">AGENTIC AI</span>
+          </div>
+        </div>
+      </header>
 
       <InputPanel onSubmit={handleSubmit} loading={loading} />
 
       {error && <div className="error-box">{error}</div>}
 
-      {/* Live step progress while running */}
       {status && !isTerminal && (
         <ProgressSteps
           status={status}
@@ -88,7 +99,6 @@ export default function App() {
         />
       )}
 
-      {/* Compact status bar once finished */}
       {isTerminal && <StatusBar status={status} />}
 
       {isDone && !isRepo && (
@@ -103,7 +113,10 @@ export default function App() {
 
       {status === 'failed' && result?.error_log?.length > 0 && (
         <div className="card">
-          <h3>Error Log</h3>
+          <div className="panel-header">
+            <span className="panel-accent" style={{ background: 'var(--red)' }} />
+            <span className="panel-title">Error Log</span>
+          </div>
           <ul className="lint-list">
             {result.error_log.map((e, i) => <li key={i}>{e}</li>)}
           </ul>

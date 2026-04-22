@@ -13,20 +13,21 @@ export default function RepoPanel({ result }) {
 
   return (
     <>
-      <div className="card">
-        <h3>Repository Summary</h3>
-        <div className="metric-row">
+      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+        <div className="repo-summary">
           <div className="metric">
             <span className="metric-label">Total files</span>
             <span className="metric-value">{total_files}</span>
           </div>
           <div className="metric">
             <span className="metric-label">Completed</span>
-            <span className="metric-value" style={{ color: '#3fb950' }}>{completed_files}</span>
+            <span className="metric-value" style={{ color: 'var(--teal)' }}>{completed_files}</span>
           </div>
           <div className="metric">
             <span className="metric-label">Failed</span>
-            <span className="metric-value" style={{ color: failed_files > 0 ? '#f85149' : '#3fb950' }}>{failed_files}</span>
+            <span className="metric-value" style={{ color: failed_files > 0 ? 'var(--red)' : 'var(--teal)' }}>
+              {failed_files}
+            </span>
           </div>
           <div className="metric">
             <span className="metric-label">Avg confidence</span>
@@ -39,8 +40,7 @@ export default function RepoPanel({ result }) {
         </div>
       </div>
 
-      <div className="card">
-        <h3>Files</h3>
+      <div className="repo-table-wrap">
         <table className="repo-table">
           <thead>
             <tr>
@@ -54,7 +54,7 @@ export default function RepoPanel({ result }) {
           <tbody>
             {files.map((f, i) => (
               <tr key={i}>
-                <td style={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{f.file_path || '—'}</td>
+                <td className="file-path">{f.file_path || '—'}</td>
                 <td>
                   <span className={`badge ${f.status === 'done' ? 'badge-green' : 'badge-red'}`}>
                     {f.status}
@@ -74,23 +74,26 @@ export default function RepoPanel({ result }) {
       </div>
 
       {(unresolved_copies.length > 0 || unresolved_calls.length > 0) && (
-        <div className="card">
-          <h3>Unresolved References</h3>
-          <p style={{ fontSize: '0.85rem', color: '#8b949e', marginBottom: 10 }}>
-            These cross-file dependencies could not be resolved automatically and need manual attention.
+        <div className="card unresolved-card">
+          <div className="panel-header">
+            <span className="panel-accent panel-accent-amber" />
+            <span className="panel-title">Unresolved References</span>
+          </div>
+          <p style={{ fontSize: '0.82rem', color: 'var(--text-mid)', marginBottom: 16 }}>
+            Cross-file dependencies not resolved automatically — require manual review.
           </p>
           {unresolved_copies.length > 0 && (
-            <div style={{ marginBottom: 10 }}>
-              <strong style={{ fontSize: '0.82rem', color: '#d29922' }}>COPY statements</strong>
-              <ul className="lint-list" style={{ marginTop: 4 }}>
+            <div className="unresolved-group">
+              <div className="unresolved-group-label">COPY Statements</div>
+              <ul className="lint-list">
                 {unresolved_copies.map(r => <li key={r}>{r}</li>)}
               </ul>
             </div>
           )}
           {unresolved_calls.length > 0 && (
-            <div>
-              <strong style={{ fontSize: '0.82rem', color: '#d29922' }}>CALL statements</strong>
-              <ul className="lint-list" style={{ marginTop: 4 }}>
+            <div className="unresolved-group">
+              <div className="unresolved-group-label">CALL Statements</div>
+              <ul className="lint-list">
                 {unresolved_calls.map(r => <li key={r}>{r}</li>)}
               </ul>
             </div>
