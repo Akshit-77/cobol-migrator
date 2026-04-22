@@ -1,5 +1,5 @@
 """
-Stage 3 tests — Validate Agent, Document Agent, and self-correction loop.
+Stage 3 tests — Validate Agent, Document Agent, Reflect Agent, and self-correction loop.
 
 Pure unit tests run without any LLM or network access.
 Integration tests (marked) require a valid LLM API key in .env.
@@ -11,7 +11,7 @@ import os
 import textwrap
 import pytest
 
-from src.agents.validate_agent import _syntax_check, _lint_check
+from src.agents.validate_agent import _syntax_check, _lint_check, _extract_function_names
 from src.agents.document_agent import _compute_confidence, _build_mapping_table
 from src.pipeline import _should_retry
 
@@ -35,6 +35,8 @@ def _make_state(**overrides) -> dict:
         "documentation": "",
         "confidence_score": 0.0,
         "status": "translating",
+        "reflection": "",
+        "fix_plan": "",
     }
     base.update(overrides)
     return base
@@ -65,7 +67,6 @@ class TestSyntaxCheck:
         assert _syntax_check(code) == []
 
     def test_undefined_name_not_a_syntax_error(self):
-        # ast.parse only checks syntax, not name resolution
         assert _syntax_check("result = undefined_var + 1") == []
 
 
@@ -91,9 +92,34 @@ class TestLintCheck:
     def test_path_prefix_stripped(self, tmp_path):
         code = "import sys\n"
         result = _lint_check(code, str(tmp_path))
-        # Result lines should NOT contain the full temp path
         for line in result:
             assert str(tmp_path) not in line
+
+
+# ── _extract_function_names ───────────────────────────────────────────────────
+
+class TestExtractFunctionNames:
+    def test_finds_top_level_functions(self):
+        code = "def compute_interest(p, r, y):\n    return p * r * y\n"
+        assert _extract_function_names(code) == ["compute_interest"]
+
+    def test_excludes_private_functions(self):
+        code = "def _helper():\n    pass\ndef public():\n    pass\n"
+        names = _extract_function_names(code)
+        assert "public" in names
+        assert "_helper" not in names
+
+    def test_multiple_functions(self):
+        code = "def foo(): pass\ndef bar(): pass\n"
+        names = _extract_function_names(code)
+        assert "foo" in names
+        assert "bar" in names
+
+    def test_returns_empty_on_invalid_code(self):
+        assert _extract_function_names("def (broken") == []
+
+    def test_empty_code_returns_empty(self):
+        assert _extract_function_names("") == []
 
 
 # ── _compute_confidence ───────────────────────────────────────────────────────
@@ -125,7 +151,6 @@ class TestComputeConfidence:
             test_results={"passed": 2, "failed": 2, "errors": [], "total": 4},
             lint_results=[],
         )
-        # 0.5 * 0.7 + 1.0 * 0.3 = 0.35 + 0.30 = 0.65
         assert _compute_confidence(state) == pytest.approx(0.65)
 
     def test_score_clamped_to_two_decimal_places(self):
@@ -185,14 +210,14 @@ class TestShouldRetry:
         )
         assert _should_retry(state) == "document"
 
-    def test_routes_to_translate_on_failures(self):
+    def test_routes_to_reflect_on_failures(self):
         state = _make_state(
             test_results={"passed": 1, "failed": 2, "errors": [], "total": 3},
             lint_results=["unused import"],
             iteration_count=1,
             max_iterations=3,
         )
-        assert _should_retry(state) == "translate"
+        assert _should_retry(state) == "reflect"
 
     def test_routes_to_document_at_max_iterations(self):
         state = _make_state(
@@ -204,7 +229,6 @@ class TestShouldRetry:
         assert _should_retry(state) == "document"
 
     def test_routes_to_document_when_no_tests_run_but_no_lint(self):
-        # 0/0 tests with no lint and no error_log → nothing to fix, go to document
         state = _make_state(
             test_results={"passed": 0, "failed": 0, "errors": [], "total": 0},
             lint_results=[],
@@ -214,24 +238,34 @@ class TestShouldRetry:
         )
         assert _should_retry(state) == "document"
 
-    def test_retries_when_no_tests_collected_error_in_log(self):
+    def test_retries_when_test_collection_error(self):
+        # 0/0 tests WITH errors in errors[] → something went wrong, must reflect
         state = _make_state(
-            test_results={"passed": 0, "failed": 0, "errors": [], "total": 0},
+            test_results={"passed": 0, "failed": 0, "errors": ["No tests collected: ImportError"], "total": 0},
             lint_results=[],
             iteration_count=1,
             max_iterations=3,
-            error_log=["ValidateAgent: No tests collected: ..."],
         )
-        assert _should_retry(state) == "translate"
+        assert _should_retry(state) == "reflect"
 
-    def test_lint_errors_alone_cause_retry(self):
+    def test_lint_errors_alone_cause_reflect(self):
         state = _make_state(
             test_results={"passed": 3, "failed": 0, "errors": [], "total": 3},
             lint_results=["line 1: undefined name 'x'"],
             iteration_count=1,
             max_iterations=3,
         )
-        assert _should_retry(state) == "translate"
+        assert _should_retry(state) == "reflect"
+
+    def test_reflect_not_triggered_when_0_total_no_errors(self):
+        # 0/0 with empty errors = no tests generated but nothing wrong → document
+        state = _make_state(
+            test_results={"passed": 0, "failed": 0, "errors": [], "total": 0},
+            lint_results=[],
+            iteration_count=1,
+            max_iterations=3,
+        )
+        assert _should_retry(state) == "document"
 
 
 # ── Integration tests ─────────────────────────────────────────────────────────
@@ -305,3 +339,11 @@ class TestValidateAgentIntegration:
         assert "failed" in tr
         assert "total" in tr
         assert tr["total"] == tr["passed"] + tr["failed"]
+
+    def test_reflect_agent_populates_reflection(self):
+        """If the pipeline needed to retry, reflection should be non-empty."""
+        from src.pipeline import run_migration
+        result = run_migration(_SAMPLE_COBOL)
+        # If iteration_count > 1, reflect must have run
+        if result["iteration_count"] > 1:
+            assert result["reflection"], "ReflectAgent should have set reflection when retrying"

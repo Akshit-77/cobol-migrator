@@ -11,6 +11,7 @@ function resolveSteps(status, iterationCount, maxIterations) {
     parsing: 0,
     translating: 1,
     validating: 2,
+    reflecting: 2,   // reflect agent runs within the validate/fix cycle
     done: 4, failed: 4,
   }[status] ?? -1
 
@@ -21,9 +22,12 @@ function resolveSteps(status, iterationCount, maxIterations) {
     else if (i < activeIdx)       state = 'done'
     else if (i === activeIdx)     state = 'running'
 
-    const isValidating = step.key === 'validate' && state === 'running' && iterationCount > 1
-    const sub = isValidating
-      ? `Retry ${iterationCount - 1}/${maxIterations - 1} — fixing errors`
+    const isReflecting = step.key === 'validate' && state === 'running' && status === 'reflecting'
+    const isRetrying   = step.key === 'validate' && state === 'running' && iterationCount > 1 && !isReflecting
+    const sub = isReflecting
+      ? `Analysing failures — building fix plan`
+      : isRetrying
+      ? `Retry ${iterationCount - 1}/${maxIterations - 1} — applying fixes`
       : step.sub
 
     return { ...step, state, sub }

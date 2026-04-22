@@ -36,16 +36,23 @@ def _build_prompt(state: MigrationState) -> str:
             + (f"  CALL: {', '.join(set(all_call))}\n" if all_call else "")
         )
 
-    error_context = ""
-    if state["error_log"] and state["iteration_count"] > 0:
-        error_context = "\nPrevious attempt failed. Fix these errors:\n" + "\n".join(state["error_log"][-5:])
+    fix_context = ""
+    if state.get("fix_plan") and state["iteration_count"] > 0:
+        fix_context = (
+            "\n\n## Fix Plan from Reflection Agent (MUST apply all of these):\n"
+            + state["fix_plan"]
+            + "\n\nApply every fix above exactly as specified."
+        )
+    elif state["error_log"] and state["iteration_count"] > 0:
+        # Fallback: surface raw errors if reflect didn't run
+        fix_context = "\nPrevious attempt errors:\n" + "\n".join(state["error_log"][-5:])
 
     return (
         f"Translate the following COBOL source to Python 3.\n\n"
         f"Source COBOL:\n{state['source_code']}\n\n"
         f"Extracted paragraphs:\n{para_text}"
         f"{unresolved}"
-        f"{error_context}"
+        f"{fix_context}"
     )
 
 

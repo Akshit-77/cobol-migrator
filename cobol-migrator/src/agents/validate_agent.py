@@ -1,5 +1,6 @@
-import ast
+import ast as ast_module
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -9,7 +10,7 @@ from src.llm import chat
 
 def _syntax_check(code: str) -> list[str]:
     try:
-        ast.parse(code)
+        ast_module.parse(code)
         return []
     except SyntaxError as e:
         return [f"SyntaxError: {e}"]
@@ -24,55 +25,92 @@ def _lint_check(code: str, tmpdir: str) -> list[str]:
         capture_output=True, text=True, timeout=10,
     )
     lines = (result.stdout + result.stderr).strip().splitlines()
-    # Strip the temp path prefix so messages are readable
     prefix = path + ":"
     return [ln.replace(prefix, "line ") for ln in lines if ln.strip()]
 
 
-def _generate_tests(state: MigrationState) -> str:
-    fn_names = [p["name"].lower().replace("-", "_") for p in state["paragraphs"]]
+def _extract_function_names(code: str) -> list[str]:
+    """Return top-level non-private function names from the translated code via AST."""
+    try:
+        tree = ast_module.parse(code)
+        return [
+            node.name for node in ast_module.walk(tree)
+            if isinstance(node, ast_module.FunctionDef) and not node.name.startswith("_")
+        ]
+    except Exception:
+        return []
+
+
+def _generate_tests(state: MigrationState) -> tuple[str, list[str]]:
+    """Return (test_body, fn_names).  The caller prepends the guaranteed import header."""
+    fn_names = _extract_function_names(state["translated_code"])
+    # Fall back to paragraph-name-derived names if AST yields nothing
+    if not fn_names:
+        fn_names = [p["name"].lower().replace("-", "_") for p in state["paragraphs"]]
+
+    import_line = (
+        f"from translated import {', '.join(fn_names)}"
+        if fn_names else "import translated"
+    )
+
     para_summaries = "\n".join(
-        f"- {p['name']}: {p['summary']}" for p in state["paragraphs"]
+        f"- {p['name']} → {p['name'].lower().replace('-', '_')}(): {p['summary']}"
+        for p in state["paragraphs"]
     )
+
     prompt = (
-        "Generate a pytest test module for the Python 3 code below.\n\n"
-        "STRICT RULES:\n"
-        "1. The code lives in a file called `translated.py`. Import from it like: "
-        f"  `from translated import {', '.join(fn_names) or 'main'}`\n"
-        "2. Do NOT use `if __name__ == '__main__':` in the test file.\n"
-        "3. Use only the Python standard library and pytest — no other packages.\n"
-        "4. Write at least one test function per function in the code.\n"
-        "5. Tests must be runnable without any external setup or files.\n"
-        "6. Output ONLY a ```python ... ``` block — nothing else.\n\n"
-        f"Function purposes:\n{para_summaries}\n\n"
-        f"Code to test:\n```python\n{state['translated_code']}\n```"
+        "Generate pytest test functions for the Python 3 code below.\n\n"
+        "IMPORTANT: The following import is ALREADY written at the top of the test file — "
+        "do NOT write it again:\n\n"
+        f"    {import_line}\n\n"
+        "RULES:\n"
+        "1. Write ONLY test functions (starting with `test_`).\n"
+        "2. Do NOT write any import statements — they are already present.\n"
+        "3. Do NOT write `if __name__ == '__main__':` blocks.\n"
+        "4. Use only Python standard library in assertions — no third-party packages.\n"
+        "5. Write at least one test function per function listed below.\n"
+        "6. Tests must be self-contained: no external files, no network, no stdin.\n"
+        "7. Output ONLY a ```python ... ``` block containing the test functions.\n\n"
+        f"Functions to test:\n{para_summaries}\n\n"
+        f"Code under test:\n```python\n{state['translated_code']}\n```"
     )
-    raw = chat(
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=2048,
-    )
-    import re
+
+    raw = chat(messages=[{"role": "user", "content": prompt}], max_tokens=2048)
     match = re.search(r"```python\n(.*?)```", raw, re.DOTALL)
-    return match.group(1).strip() if match else raw.strip()
+    test_body = match.group(1).strip() if match else raw.strip()
+
+    # Strip any `from translated import` / `import translated` lines the LLM added anyway
+    test_body = "\n".join(
+        ln for ln in test_body.splitlines()
+        if not re.match(r"^\s*(from\s+translated\s+import|import\s+translated)", ln)
+    )
+
+    return test_body, fn_names
 
 
-def _run_tests(translated_code: str, test_code: str, tmpdir: str) -> dict:
+def _run_tests(translated_code: str, test_body: str, fn_names: list[str], tmpdir: str) -> dict:
     src_path = os.path.join(tmpdir, "translated.py")
     test_path = os.path.join(tmpdir, "test_translated.py")
-    # conftest.py puts tmpdir on sys.path so `import translated` always works
     conftest_path = os.path.join(tmpdir, "conftest.py")
 
-    # Prepend path setup directly into the test file — guaranteed to work
-    # regardless of pytest rootdir, conftest resolution, or PYTHONPATH state.
-    path_header = (
-        f"import sys as _sys, os as _os\n"
-        f"_sys.path.insert(0, {tmpdir!r})\n\n"
+    import_line = (
+        f"from translated import {', '.join(fn_names)}"
+        if fn_names else "import translated"
+    )
+
+    # Guaranteed header injected before any LLM-generated code:
+    # - sys.path ensures `import translated` resolves
+    # - explicit import so test functions never hit NameError on the functions they call
+    header = (
+        f"import sys as _sys\n"
+        f"_sys.path.insert(0, {tmpdir!r})\n"
+        f"{import_line}\n\n"
     )
 
     with open(src_path, "w") as f:
         f.write(translated_code)
     with open(test_path, "w") as f:
-        f.write(path_header + test_code)
+        f.write(header + test_body)
     with open(conftest_path, "w") as f:
         f.write(f"import sys\nsys.path.insert(0, {tmpdir!r})\n")
 
@@ -86,20 +124,17 @@ def _run_tests(translated_code: str, test_code: str, tmpdir: str) -> dict:
     )
     output = result.stdout + result.stderr
 
-    import re
     passed = len(re.findall(r" PASSED", output))
     failed = len(re.findall(r" FAILED", output))
-    # Capture collection errors so the self-correction loop can see them
-    errors = [ln for ln in output.splitlines()
-              if "ERROR" in ln or "FAILED" in ln or "ImportError" in ln or "ModuleNotFoundError" in ln]
+    errors = [
+        ln for ln in output.splitlines()
+        if any(kw in ln for kw in ("ERROR", "FAILED", "ImportError", "ModuleNotFoundError", "AttributeError"))
+    ]
     total = passed + failed
 
-    # If nothing ran at all, surface the full output so the loop can fix it
     if total == 0:
-        import sys as _sys
-        print("[validate_agent] 0 tests collected. pytest output:", file=_sys.stderr)
-        print(output[:800] if output else "(empty)", file=_sys.stderr)
-        short = "\n".join(output.strip().splitlines()[:8]) if output.strip() else "pytest produced no output"
+        # Surface full pytest output so reflect agent can diagnose it
+        short = "\n".join(output.strip().splitlines()[:12]) if output.strip() else "pytest produced no output"
         errors = errors or [f"No tests collected: {short}"]
 
     return {"passed": passed, "failed": failed, "errors": errors, "total": total}
@@ -108,7 +143,6 @@ def _run_tests(translated_code: str, test_code: str, tmpdir: str) -> dict:
 def validate_agent(state: MigrationState) -> MigrationState:
     code = state["translated_code"]
 
-    # Step 1: syntax check — if it fails, no point running anything else
     syntax_errors = _syntax_check(code)
     if syntax_errors:
         return {
@@ -120,24 +154,22 @@ def validate_agent(state: MigrationState) -> MigrationState:
         }
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        # Step 2: pyflakes lint
         try:
             lint_results = _lint_check(code, tmpdir)
         except Exception as e:
             lint_results = [f"Lint error: {e}"]
 
-        # Step 3: generate pytest tests
+        test_code = ""
+        fn_names: list[str] = []
         try:
-            test_code = _generate_tests(state)
+            test_code, fn_names = _generate_tests(state)
         except Exception as e:
-            test_code = ""
             lint_results = lint_results + [f"TestGen error: {e}"]
 
-        # Step 4: run tests
         test_results: dict = {"passed": 0, "failed": 0, "errors": [], "total": 0}
         if test_code:
             try:
-                test_results = _run_tests(code, test_code, tmpdir)
+                test_results = _run_tests(code, test_code, fn_names, tmpdir)
             except subprocess.TimeoutExpired:
                 test_results = {"passed": 0, "failed": 0, "errors": ["Tests timed out"], "total": 0}
             except Exception as e:

@@ -16,7 +16,9 @@ class MigrationState(TypedDict):
     error_log: list[str]
     documentation: str
     confidence_score: float
-    status: str                     # "parsing"|"translating"|"validating"|"done"|"failed"
+    status: str                     # "parsing"|"translating"|"validating"|"reflecting"|"done"|"failed"
+    reflection: str                 # ReflectAgent's diagnosis of validation failures
+    fix_plan: str                   # Structured fix instructions for the next translate iteration
 
 
 class RepoMigrationResult(TypedDict):
